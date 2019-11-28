@@ -32,11 +32,7 @@ float ReLu::GetFops(const std::vector<TShape>& inputs, const std::vector<TShape>
 
 void ReLu::SetSchema(void)
 {
-    Input({"input:float32"})
-        .Output({"output:float32"})
-        .SetAttr("negative_slope", 0.f)
-        .SetLayout("NCHW")
-        .SetDoc(R"DOC(ReLu Operator)DOC");
+    Input({"input:float32"}).Output({"output:float32"}).SetAttr("negative_slope", 0.f).SetDoc(R"DOC(ReLu Operator)DOC");
 }
 
 }    // namespace TEngine

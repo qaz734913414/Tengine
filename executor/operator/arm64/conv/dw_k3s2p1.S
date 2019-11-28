@@ -52,8 +52,54 @@
 .global KERNEL_NAME
 .type KERNEL_NAME, %function
 
-
 KERNEL_NAME:
+   //used v8,v12,v13
+   sub sp,sp,#0x20
+   stp d8,d9, [sp]
+   stp d12,d13,[sp,0x10]
+
+   fmov s31,wzr
+   cmp x1,2
+   bgt begin
+   cmp x2,2
+   bgt begin
+   cmp x1,1
+   bne input_2_2
+
+input_1_1:
+   ldr s12,[x0]
+   ldr s24,[x3,#16]
+   fmul s4,s24,s12
+   cbz x5,input_1_1_non_biases
+   ldr s21,[x5]
+   fadd s4,s21,s4
+input_1_1_non_biases:
+#ifdef CONV_RELU_FUSE
+   fmax s4,s4,s31
+#endif
+   str s4,[x4]
+   b all_row_done
+
+// input size is 2x2
+input_2_2:
+   ld1 {v12.4s},[x0]        //a00,a01,a10,a11
+   ld1 {v23.4s,v24.4s,v25.4s}, [x3]
+   ins v24.s[2],v24.s[3]
+   ins v24.s[3],v25.s[0]    //k11,k12,k21,k22
+   fmul v4.4s,v12.4s,v24.4s
+   faddp v4.4s,v4.4s,v4.4s
+   faddp v4.4s,v4.4s,v4.4s
+   cbz x5,input_2_2_non_biases
+   ldr s21,[x5]
+   fadd s4,s21,s4
+input_2_2_non_biases:
+#ifdef CONV_RELU_FUSE
+    fmax s4,s4,s31
+#endif
+   str s4,[x4]
+   b all_row_done
+
+begin:
    //Load Kernel
    ld1 {v24.4s,v25.4s,v26.4s}, [x3]
    ext  v26.16b,v25.16b,v26.16b,8
@@ -63,7 +109,6 @@ KERNEL_NAME:
    lsr x9,x9,1
    add x9,x9,1
    lsl x9,x9,2
-   fmov s31,wzr
    dup  v31.4s,v31.s[0]
 
    //get bias
@@ -193,7 +238,8 @@ first_left_save_1_3:
    str s28,[x10],#4
 
 first_row_done:
-
+   cmp x1,1
+   beq all_row_done
 
 odd_row_start:
    sub x1,x1,1
@@ -682,8 +728,10 @@ last_odd_left_load_done:
 
 last_odd_row_done:   
 all_row_done:
+    ldp d8,d9,[sp]
+    ldp d12,d13,[sp,0x10]
+    add sp,sp,#0x20
    ret
-
 
 
 

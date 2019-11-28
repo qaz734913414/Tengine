@@ -189,14 +189,6 @@ struct EltwiseOps : public NodeOps
             case 4:
                 result = kernel_run<float>(output, input0, input1, param->type, ishape, input1_count4);
                 break;
-#ifdef CONFIG_FLOAT16
-            case 2:
-                result = kernel_run<__fp16>(output, input0, input1, param->type, ishape, input1_count4);
-                break;
-#endif
-            case 1:
-                result = kernel_run<char>(output, input0, input1, param->type, ishape, input1_count4);
-                break;
         }
 
         return result;
@@ -204,15 +196,25 @@ struct EltwiseOps : public NodeOps
 
 };    // struct EltwiseOps
 
+NodeOps* SelectFunc(const CPUInfo* cpu_info, Node* node)
+{
+    Tensor* input = node->GetInputTensor(0);
+    const int data_type = input->GetDataType();
+    if(data_type != TENGINE_DT_FP32)
+        return nullptr;
+
+    EltwiseOps* ops = new EltwiseOps();
+
+    return ops;
+}
+
 }    // namespace EltwiseImpl
 
 using namespace EltwiseImpl;
 
 void RegisterEltwiseNodeExec(void)
 {
-    EltwiseOps* ops = new EltwiseOps();
-
-    NodeOpsRegistryManager::RegisterOPImplementor("common", "Eltwise", ops);
+    NodeOpsRegistryManager::RegisterOPImplementor("common", "Eltwise", EltwiseImpl::SelectFunc, 1000);
 }
 
 }    // namespace TEngine

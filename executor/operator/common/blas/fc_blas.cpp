@@ -67,8 +67,15 @@ struct FcBlasOps : public NodeOps
 
         int batch_number = in_dims[0];
         int inc = in_dims[1];
-        int inh = in_dims[2];
-        int inw = in_dims[3];
+        int inh = 1;
+        int inw = 1;
+
+        if(in_dims.size() > 2)
+            inh = in_dims[2];
+
+        if(in_dims.size() > 3)
+            inw = in_dims[3];
+
         int in_chw = inc * inh * inw;
 
         /* specially handling on tensorflow models */
@@ -122,14 +129,25 @@ struct FcBlasOps : public NodeOps
     }
 };
 
+NodeOps* SelectFunc(const CPUInfo* cpu_info, Node* node)
+{
+    Tensor* input = node->GetInputTensor(0);
+    const int data_type = input->GetDataType();
+    const ExecAttr* exec_attr = any_cast<const ExecAttr*>(node->GetAttr(ATTR_EXEC_ATTR));
+    if(data_type != TENGINE_DT_FP32 || exec_attr->graph_layout != TENGINE_LAYOUT_NCHW)
+        return nullptr;
+
+    FcBlasOps* ops = new FcBlasOps();
+
+    return ops;
+}
+
 }    // namespace FCImpl
 
 using namespace FCImpl;
 void RegisterFcBlasNodeExec(void)
 {
-    FcBlasOps* ops = new FcBlasOps();
-
-    NodeOpsRegistryManager::RegisterOPImplementor("common", "FullyConnected", ops);
+    NodeOpsRegistryManager::RegisterOPImplementor("common", "FullyConnected", FCImpl::SelectFunc, 1000);
 }
 
 }    // namespace TEngine

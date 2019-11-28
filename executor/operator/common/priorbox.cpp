@@ -130,10 +130,10 @@ struct PriorBoxOps : public NodeOps
                         box += 4;
                         if(param_->flip)
                         {
-                            box[0] = (center_x - box_height * 0.5f) / img_h;
-                            box[1] = (center_y - box_width * 0.5f) / img_w;
-                            box[2] = (center_x + box_height * 0.5f) / img_h;
-                            box[3] = (center_y + box_width * 0.5f) / img_w;
+                            box[0] = (center_x - box_height * 0.5f) / img_w;
+                            box[1] = (center_y - box_width * 0.5f) / img_h;
+                            box[2] = (center_x + box_height * 0.5f) / img_w;
+                            box[3] = (center_y + box_width * 0.5f) / img_h;
                             box += 4;
                         }
                     }
@@ -165,15 +165,26 @@ struct PriorBoxOps : public NodeOps
     }
 };
 
+NodeOps* SelectFunc(const CPUInfo* cpu_info, Node* node)
+{
+    Tensor* input = node->GetInputTensor(0);
+    const int data_type = input->GetDataType();
+    const ExecAttr* exec_attr = any_cast<const ExecAttr*>(node->GetAttr(ATTR_EXEC_ATTR));
+    if(data_type != TENGINE_DT_FP32 || exec_attr->graph_layout != TENGINE_LAYOUT_NCHW)
+        return nullptr;
+
+    PriorBoxOps* ops = new PriorBoxOps();
+
+    return ops;
+}
+
 }    // namespace PriorBoxImpl
 
 using namespace PriorBoxImpl;
 
 void RegisterPriorBoxNodeExec(void)
 {
-    PriorBoxOps* ops = new PriorBoxOps();
-
-    NodeOpsRegistryManager::RegisterOPImplementor("common", "PriorBox", ops);
+    NodeOpsRegistryManager::RegisterOPImplementor("common", "PriorBox", PriorBoxImpl::SelectFunc, 1000);
 }
 
 }    // namespace TEngine

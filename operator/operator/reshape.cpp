@@ -28,6 +28,7 @@ namespace TEngine {
 bool Reshape::InferShape(const std::vector<TEngine::TShape>& ishape, std::vector<TEngine::TShape>& oshape, int layout)
 {
     const TShape& input = ishape[0];
+    std::vector<int> in_dim=input.GetDim();
     const int size = input.GetSize();
     std::vector<int> new_shape;
     int new_size = 1;
@@ -43,10 +44,12 @@ bool Reshape::InferShape(const std::vector<TEngine::TShape>& ishape, std::vector
     // printf("new_shape: %d, %d, %d, %d\n",new_shape[0],new_shape[1],new_shape[2],new_shape[3]);
     int dim_size = new_shape.size();
     int idx = -1;
+    
+    //Ref: http://caffe.berkeleyvision.org/tutorial/layers/reshape.html
     for(int i = 0; i < dim_size; i++)
     {
         if(new_shape[i] == 0)
-            new_shape[i] = 1;
+            new_shape[i] = in_dim[i]; 
         else if(new_shape[i] == -1)
             idx = i;
         else
@@ -60,24 +63,8 @@ bool Reshape::InferShape(const std::vector<TEngine::TShape>& ishape, std::vector
 
     TShape shape;
     shape.SetDim(new_shape);
-    // only support 2-D 3-D or 4-D
-    if(new_shape.size() == 4)
-    {
-        if(layout == TENGINE_LAYOUT_NCHW)
-            shape.SetDataLayout("NCHW");
-        else
-            shape.SetDataLayout("NHWC");
-    }
-    else if(new_shape.size() == 3)
-    {
-        shape.SetDataLayout("NHW");
-    }
-    else if(new_shape.size() == 2)
-    {
-        shape.SetDataLayout("HW");
-    }
-    else
-        return false;
+    shape.SetDataLayout(input.GetDataLayout());
+
     oshape[0] = shape;
     return true;
 }
@@ -86,7 +73,6 @@ void Reshape::SetSchema(void)
 {
     Input({"input:float32"})
         .Output({"output:float32"})
-        .SetLayout("NCHW")
         .SetAttr("dim_0", -2)
         .SetAttr("dim_1", -2)
         .SetAttr("dim_2", -2)

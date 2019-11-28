@@ -25,10 +25,7 @@
 #include <iomanip>
 #include <string>
 #include "tengine_c_api.h"
-#include "tengine_config.hpp"
 #include <sys/time.h>
-
-using namespace TEngine;
 
 int main(int argc, char* argv[])
 {
@@ -72,6 +69,16 @@ int main(int argc, char* argv[])
     tensor_t input_tensor = get_graph_tensor(graph, input_tensor_name);
     int dims[] = {1, 3, img_h, img_w};
     set_tensor_shape(input_tensor, dims, 4);
+
+    // if use gpu
+    int use_gpu = 0;
+    const char* gpu_flag = std::getenv("USE_GPU");
+    if(gpu_flag)
+        use_gpu = atoi(gpu_flag);
+    if(use_gpu)
+        set_graph_device(graph, "acl_opencl");
+    //
+
     int ret_prerun = prerun_graph(graph);
     if(ret_prerun < 0)
     {

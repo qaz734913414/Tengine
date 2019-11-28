@@ -75,19 +75,23 @@ struct ReLu6Ops : public NodeOps
             case 4:
                 kernel_run<float>(data, elem_num);
                 break;
-#ifdef CONFIG_FLOAT16
-            case 2:
-                kernel_run<__fp16>(data, elem_num);
-                break;
-#endif
-            case 1:
-                kernel_run<char>(data, elem_num);
-                break;
         }
 
         return true;
     }
 };
+
+NodeOps* SelectFunc(const CPUInfo* cpu_info, Node* node)
+{
+    Tensor* input = node->GetInputTensor(0);
+    const int data_type = input->GetDataType();
+    if(data_type != TENGINE_DT_FP32)
+        return nullptr;
+
+    ReLu6Ops* ops = new ReLu6Ops();
+
+    return ops;
+}
 
 }    // namespace ReLu6Impl
 
@@ -95,9 +99,7 @@ using namespace ReLu6Impl;
 
 void RegisterReLu6NodeExec(void)
 {
-    ReLu6Ops* ops = new ReLu6Ops();
-
-    NodeOpsRegistryManager::RegisterOPImplementor("common", "ReLu6", ops);
+    NodeOpsRegistryManager::RegisterOPImplementor("common", "ReLu6", ReLu6Impl::SelectFunc, 1000);
 }
 
 }    // namespace TEngine

@@ -94,19 +94,30 @@ struct ScaleOps : public NodeOps
             case 4:
                 kernel_run<float>(input, output, gamma, beta, shape);
                 break;
-#ifdef CONFIG_FLOAT16
             case 2:
+#if CONFIG_KERNEL_FP16 && __ARM_ARCH >= 8
                 kernel_run<__fp16>(input, output, gamma, beta, shape);
                 break;
+#else
+                return false;
 #endif
-            case 1:
-                kernel_run<char>(input, output, gamma, beta, shape);
-                break;
         }
 
         return true;
     }
 };
+
+NodeOps* SelectFunc(const CPUInfo* cpu_info, Node* node)
+{
+    Tensor* input = node->GetInputTensor(0);
+    const int data_type = input->GetDataType();
+    if(data_type != TENGINE_DT_FP32 && data_type != TENGINE_DT_FP16)
+        return nullptr;
+
+    ScaleOps* ops = new ScaleOps();
+
+    return ops;
+}
 
 }    // namespace ScaleImpl
 
@@ -114,9 +125,7 @@ using namespace ScaleImpl;
 
 void RegisterScale_NodeExec(void)
 {
-    ScaleOps* ops = new ScaleOps();
-
-    NodeOpsRegistryManager::RegisterOPImplementor("common", "Scale", ops);
+    NodeOpsRegistryManager::RegisterOPImplementor("common", "Scale", ScaleImpl::SelectFunc, 1000);
 }
 
 }    // namespace TEngine

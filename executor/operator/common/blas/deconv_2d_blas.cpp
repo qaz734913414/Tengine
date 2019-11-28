@@ -35,11 +35,15 @@
 #include <sys/time.h>
 #include <cblas.h>
 
+#ifdef CONFIG_AUTH_DEVICE
+#include "auth_nodeops.hpp"
+#endif
+
 namespace TEngine {
 
-namespace DeconvolutionImpl {
+namespace DeconvolutionBlasImpl {
 
-struct DeconvBlasOps : public NodeOps
+struct DeconvBlasOps : public MTNodeOps
 {
     bool Prerun(Node* node)
     {
@@ -51,7 +55,7 @@ struct DeconvBlasOps : public NodeOps
         const TShape& shape = input_tensor->GetShape();
         const std::vector<int> dims = shape.GetDim();
 
-        int size = dims[2] * dims[3] * param_->kernel_size * param_->kernel_size * param_->num_output;
+        int size = dims[2] * dims[3] * param_->kernel_h * param_->kernel_w * param_->num_output;
         float* buffer = ( float* )std::malloc(sizeof(float) * size);
         memset(buffer, 0, size * sizeof(float));
         (*node)["buffer"] = buffer;
@@ -147,17 +151,20 @@ struct DeconvBlasOps : public NodeOps
         const Tensor* weight_tensor = node->GetInputTensor(1);
         float* weight = ( float* )get_tensor_mem(weight_tensor);
 
-        // bias
-        const Tensor* bias_tensor = node->GetInputTensor(2);
-        float* bias = ( float* )get_tensor_mem(bias_tensor);
+        bool have_biases = (node->GetInputNum() > 2);
+        float* bias = nullptr;
+        if(have_biases)
+        {
+            bias = ( float* )get_tensor_mem(node->GetInputTensor(2));
+        }
 
         // param
         Deconvolution* deconv_op = dynamic_cast<Deconvolution*>(node->GetOp());
         DeconvParam* param_ = deconv_op->GetParam();
-        int pad = param_->pad;
-        int stride = param_->stride;
-        int ksize = param_->kernel_size;
-        int dilation = param_->dilation;
+        int pad = param_->pad_w0;
+        int stride = param_->stride_w;
+        int ksize = param_->kernel_w;
+        int dilation = param_->dilation_w;
 
         // buffer
         float* buffer = any_cast<float*>(node->GetAttr("buffer"));
@@ -188,8 +195,13 @@ struct DeconvBlasOps : public NodeOps
             cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m, n, k, 1, weight, m, inp, n, 0, buffer, n);
 
             col2im(buffer, out_ptr, c_out, h_out, w_out, ksize, stride, pad, dilation, h_in, w_in);
-
-            add_bias(out_ptr, bias, c_out, hw_out);
+        }
+        if(have_biases)
+        {
+            for(int i = 0; i < batch; i++)
+            {
+                add_bias(output + i * chw_out, bias, c_out, hw_out);
+            }
         }
 
         return true;
@@ -205,15 +217,42 @@ struct DeconvBlasOps : public NodeOps
     }
 };
 
-}    // namespace DeconvolutionImpl
+static bool isDeconvSupported(DeconvParam* param)
+{
+    if(param->pad_h0 != param->pad_h1 || param->pad_w0 != param->pad_w1 || param->pad_w0 != param->pad_h0 ||
+       param->stride_h != param->stride_w || param->dilation_h != param->dilation_w || param->group != 1 ||
+       param->kernel_h != param->kernel_w)
+        return false;
+    return true;
+}
+NodeOps* SelectFunc(const CPUInfo* cpu_info, Node* node)
+{
+#ifdef CONFIG_AUTH_DEVICE
+    if(!get_auth_float_enabled())
+        return nullptr;
+#endif
+    Operator* op = node->GetOp();
+    Deconvolution* deconv_op = dynamic_cast<Deconvolution*>(op);
+    DeconvParam* param = deconv_op->GetParam();
+    if(!isDeconvSupported(param))
+        return nullptr;
 
-using namespace DeconvolutionImpl;
+    Tensor* input = node->GetInputTensor(0);
+    const int data_type = input->GetDataType();
+    const ExecAttr* exec_attr = any_cast<const ExecAttr*>(node->GetAttr(ATTR_EXEC_ATTR));
+    if(data_type != TENGINE_DT_FP32 || exec_attr->graph_layout != TENGINE_LAYOUT_NCHW)
+        return nullptr;
+    DeconvBlasOps* ops = new DeconvBlasOps();
+    return ops;
+}
+
+}    // namespace DeconvolutionBlasImpl
+
+using namespace DeconvolutionBlasImpl;
 
 void RegisterDeconvBlasNodeExec(void)
 {
-    DeconvBlasOps* ops = new DeconvBlasOps();
-
-    NodeOpsRegistryManager::RegisterOPImplementor("common", "Deconvolution", ops);
+    NodeOpsRegistryManager::RegisterOPImplementor("common", "Deconvolution", DeconvolutionBlasImpl::SelectFunc, 1000);
 }
 
 }    // namespace TEngine

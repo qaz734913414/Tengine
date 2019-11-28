@@ -1,11 +1,11 @@
 obj-$(CONFIG_ARCH_ARM64)+=arm64/
 obj-y+=ref/
 obj-y+=common/
+obj-y+=init.o
 
 COMMON_CFLAGS+=-I$(shell pwd)/include
-
-ifneq ($(CONFIG_OPT_CFLAGS),)
-   COMMON_CFLAGS+=-O3 -funroll-loops
+ifeq ($(CONFIG_ARCH_BLAS),y)
+	COMMON_CFLAGS+=-I/usr/include/openblas
 endif
 
 #below are examples to build with pre-compiled object

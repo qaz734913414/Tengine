@@ -55,6 +55,10 @@
 #include "custom_kernel.hpp"
 #include "operator/generic.hpp"
 
+#ifdef ENABLE_ONLINE_REPORT
+#include "tenginereportmgr.hpp"
+#endif
+
 using namespace TEngine;
 
 #define TO_BE_IMPLEMENTED XLOG_WARN() << "TODO: " << __FUNCTION__ << " to be implemented\n"
@@ -88,7 +92,10 @@ int init_tengine(void)
         set_cpu_list(cpu_list_str);
     }
 
-    InitAllPlugin();
+    if(InitAllPlugin() < 0)
+    {
+        return -1;
+    }
 
     if(TEnginePlugin::InitModule() < 0)
     {
@@ -101,18 +108,169 @@ int init_tengine(void)
     TEngineConfig::Set("exec.engine", "generic", true);
 
     init_mutex.unlock();
+
+    #ifdef ENABLE_ONLINE_REPORT
+    init_tengine_report_mgr();
+    do_tengine_report(ACTION_INIT);
+    #endif
     return 0;
+}
+
+static int get_mem_line_int(char* line)
+{
+    char* p = strtok(line, " \t");
+
+    p = strtok(NULL, " \t");
+
+    return strtoul(p, NULL, 10);
+}
+
+static void get_sustain_mem(int* all_rss, int* ex_rss, int* anon_rss)
+{
+    int pid = getpid();
+    int vm_size = 0;
+    int rss_size = 0;
+    int pss_size = 0;
+    int ex_vm_size = 0;
+    int ex_rss_size = 0;
+    int ex_pss_size = 0;
+    int nomap_vm_size = 0;
+    int nomap_rss_size = 0;
+    int nomap_pss_size = 0;
+
+    char fname[128];
+
+    sprintf(fname, "/proc/%d/smaps", pid);
+
+    FILE* fp = fopen(fname, "r");
+
+    char line[1024];
+
+    while(fgets(line, 1024, fp))
+    {
+        /* 33f69000-33fbc000 rw-p 00000000 00:00 0 */
+        int nomap_block = 0;
+        if(strncmp(line, "Name:", strlen("Name:")) == 0)
+            if(fgets(line, 1024, fp) == NULL)
+                break;
+
+        char* p = strtok(line, " \t");
+
+        p = strtok(NULL, " \t");
+        p = strtok(NULL, " \t");
+        p = strtok(NULL, " \t");
+
+        if(!strcmp(p, "00:00"))
+            nomap_block = 1;
+
+        if(fgets(line, 1024, fp) == NULL)
+            break;
+
+        int cur_vm_size = get_mem_line_int(line);
+
+        /* search VmFlags: the last line in one block*/
+        while(fgets(line, 1024, fp) && strncmp(line, "Rss:", strlen("Rss:")))
+            ;
+
+        int cur_rss_size = get_mem_line_int(line);
+
+        /* Pss:                   4 kB */
+        while(fgets(line, 1024, fp) && strncmp(line, "Pss:", strlen("Pss:")))
+            ;
+
+        int cur_pss_size = get_mem_line_int(line);
+
+        /* search VmFlags: the last line in one block*/
+        while(fgets(line, 1024, fp) && strncmp(line, "VmFlags:", strlen("VmFlags:")))
+            ;
+
+        if(strstr(line, "ex"))
+        {
+            ex_vm_size += cur_vm_size;
+            ex_rss_size += cur_rss_size;
+            ex_pss_size += cur_pss_size;
+        }
+
+        if(nomap_block)
+        {
+            nomap_vm_size += cur_vm_size;
+            nomap_rss_size += cur_rss_size;
+            nomap_pss_size += cur_pss_size;
+        }
+
+        vm_size += cur_vm_size;
+        rss_size += cur_rss_size;
+        pss_size += cur_pss_size;
+    }
+
+    fclose(fp);
+
+    *all_rss = pss_size;
+    *anon_rss = nomap_pss_size;
+    *ex_rss = ex_pss_size;
+}
+
+static int get_peak_mem(void)
+{
+    int peak_mem = 0;
+    int pid = getpid();
+
+    char fname[128];
+
+    sprintf(fname, "/proc/%d/status", pid);
+
+    FILE* fp = fopen(fname, "r");
+
+    char line[128];
+
+    while(fgets(line, 128, fp))
+    {
+        if(strncmp(line, "VmHWM:", strlen("VmHWM:")))
+            continue;
+
+        char* p = line + strlen("VmHWM:");
+
+        peak_mem = strtoul(p, NULL, 10);
+    }
+
+    fclose(fp);
+
+    return peak_mem;
+}
+
+static void dump_mem_prof(void)
+{
+    int all_rss, ex_rss, anon_rss;
+
+    get_sustain_mem(&all_rss, &ex_rss, &anon_rss);
+
+    LOG_INFO() << "\nmemory profile result:\n";
+    LOG_INFO() << "--------------------------------------\n";
+    LOG_INFO() << "peak phys mem (data+code): \t" << get_peak_mem() << " kb\n";
+    LOG_INFO() << "sustain phys mem (data+code):\t" << all_rss << " kb\n";
+    LOG_INFO() << "executable phys mem (code):\t" << ex_rss << " kb\n";
+    LOG_INFO() << "anon mapped phys mem (data):\t" << anon_rss << " kb\n";
 }
 
 void release_tengine(void)
 {
     TEnginePlugin::ReleaseModule();
+    #ifdef ENABLE_ONLINE_REPORT
+    do_tengine_report(ACTION_RELEASE);
+    release_tengine_report_mgr();
+    #endif
 }
+
+/*
+   model_format == NULL, only happens when create a new graph, instead of loading a model
+   model_format == "xxx:m", it is to load model from memory instead of file
+*/
 
 graph_t create_graph(context_t context, const char* model_format, const char* fname, ...)
 {
     va_list argp;
     va_start(argp, fname);
+
     bool new_context_created = false;
 
     ExecContext* exec_context = reinterpret_cast<ExecContext*>(context);
@@ -133,41 +291,62 @@ graph_t create_graph(context_t context, const char* model_format, const char* fn
         new_context_created = true;
     }
 
+    graph_t graph = nullptr;
     const char* graph_name = nullptr;
     char tmp_buf[128];
 
+    /* if model_format is NULL, create a empty graph, so that model_name is NULL */
     if(model_format == nullptr)
     {
         sprintf(tmp_buf, "graph0x%lx:%u", ( long )context, rand());
         graph_name = tmp_buf;
-    }
-    else
-    {
-        graph_name = fname;
-    }
 
-    sprintf(tmp_buf, "%p:", ( void* )exec_context);
-
-    std::string model_name(tmp_buf);
-
-    model_name += graph_name;
-
-    if(model_format && vload_file_model(exec_context, model_name.c_str(), model_format, fname, argp) < 0)
-    {
-        if(new_context_created)
-            delete exec_context;
-
-        return nullptr;
-    }
-
-    // dump_model(model_name.c_str());
-
-    graph_t graph;
-
-    if(model_format)
-        graph = create_graph_in_context(exec_context, graph_name, model_name.c_str());
-    else
         graph = create_graph_in_context(exec_context, graph_name, nullptr);
+    }
+    else
+    {
+        bool file_model = true;
+        std::string real_format(model_format);
+
+        auto pos = real_format.rfind(':');
+
+        if(pos != std::string::npos && (pos == real_format.size() - 2) && real_format[pos + 1] == 'm')
+        {
+            file_model = false;
+            graph_name = "mem";
+
+            real_format.resize(pos);
+        }
+        else
+        {
+            graph_name = fname;
+        }
+
+        sprintf(tmp_buf, "%p:", ( void* )exec_context);
+
+        std::string model_name(tmp_buf);
+
+        model_name += graph_name;
+
+        bool model_loaded = false;
+
+        if(file_model)
+        {
+            if(vload_file_model(exec_context, model_name.c_str(), model_format, fname, argp) == 0)
+                model_loaded = true;
+        }
+        else
+        {
+            const void* addr = ( const void* )fname;
+            int mem_size = va_arg(argp, int);
+
+            if(vload_mem_model(exec_context, model_name.c_str(), real_format.c_str(), addr, mem_size, argp) == 0)
+                model_loaded = true;
+        }
+
+        if(model_loaded)
+            graph = create_graph_in_context(exec_context, graph_name, model_name.c_str());
+    }
 
     if(graph == nullptr)
     {
@@ -191,6 +370,38 @@ int save_graph(graph_t graph, const char* model_format, const char* fname, ...)
     va_start(argp, fname);
 
     return save_graph_internal(graph, model_format, fname, argp);
+}
+
+int post_train_graph(graph_t graph,const char* file_name)
+{
+    return post_train_graph_internal(graph,file_name);
+}
+#if 1
+void dump_graph_tensor_scale(graph_t graph)
+{
+    dump_graph_tensor_scale_internal(graph);
+}
+#endif
+
+int quant_graph(graph_t graph, int quant_mode, int node_no_quant_idxs[], int node_no_quant_number)
+{
+    GraphExecutor* executor = static_cast<GraphExecutor*>(graph);
+    Graph* g = executor->GetOptimizedGraph();
+
+    if(g->GetModelFormat() == MODEL_FORMAT_TFLITE)
+    {
+        LOG_INFO() << "Not quant tf-lite model.\n";
+        return 0;
+    }
+
+    if(quant_mode != TENGINE_QUANT_FP16 && quant_mode != TENGINE_QUANT_INT8)
+    {
+        LOG_ERROR() << "Currently only support fp16 and int8 quant.\n";
+        set_tengine_errno(EINVAL);
+        return -1;
+    }
+
+    return quant_graph_internal(graph, quant_mode, node_no_quant_idxs, node_no_quant_number);
 }
 
 int set_graph_layout(graph_t graph, int layout_type)
@@ -365,7 +576,7 @@ int get_graph_input_node_number(graph_t graph)
 {
     GraphExecutor* executor = reinterpret_cast<GraphExecutor*>(graph);
 
-    Graph* real_graph = executor->GetGraph();
+    Graph* real_graph = executor->GetOptimizedGraph();
 
     return real_graph->input_nodes.size();
 }
@@ -374,7 +585,7 @@ node_t get_graph_input_node(graph_t graph, int idx)
 {
     GraphExecutor* executor = reinterpret_cast<GraphExecutor*>(graph);
 
-    Graph* real_graph = executor->GetGraph();
+    Graph* real_graph = executor->GetOptimizedGraph();
 
     if(idx >= ( int )real_graph->input_nodes.size())
     {
@@ -393,7 +604,7 @@ int get_graph_output_node_number(graph_t graph)
 {
     GraphExecutor* executor = reinterpret_cast<GraphExecutor*>(graph);
 
-    Graph* real_graph = executor->GetGraph();
+    Graph* real_graph = executor->GetOptimizedGraph();
 
     return real_graph->output_nodes.size();
 }
@@ -402,7 +613,7 @@ node_t get_graph_output_node(graph_t graph, int idx)
 {
     GraphExecutor* executor = reinterpret_cast<GraphExecutor*>(graph);
 
-    Graph* real_graph = executor->GetGraph();
+    Graph* real_graph = executor->GetOptimizedGraph();
 
     if(idx >= ( int )real_graph->output_nodes.size())
     {
@@ -691,12 +902,40 @@ int get_node_input_number(node_t node)
     return real_node->GetInputNum();
 }
 
-int add_node_attr(node_t node, const char* attr_name, const void* type_info, int size)
+int get_graph_node_number(graph_t graph)
+{
+    GraphExecutor* executor = reinterpret_cast<GraphExecutor*>(graph);
+    Graph* real_graph = executor->GetOptimizedGraph();
+
+    return real_graph->seq_nodes.size();
+}
+
+node_t get_graph_node_by_idx(graph_t graph, int node_idx)
+{
+    GraphExecutor* executor = reinterpret_cast<GraphExecutor*>(graph);
+    Graph* real_graph = executor->GetOptimizedGraph();
+
+    int node_num = real_graph->seq_nodes.size();
+
+    if(node_idx < 0 || node_idx >= node_num)
+    {
+        set_tengine_errno(EINVAL);
+        return nullptr;
+    }
+
+    Node* node = real_graph->seq_nodes[node_idx];
+
+    node->SetAttr(ATTR_API_GRAPH, executor);
+
+    return node;
+}
+
+int add_node_attr(node_t node, const char* attr_name, const char* type_name, int size)
 {
     /* first check if the attribute exists*/
     void* buf = malloc(size);
 
-    int ret = get_node_attr_generic(node, attr_name, type_info, buf, size);
+    int ret = get_node_attr_generic(node, attr_name, type_name, buf, size);
 
     free(buf);
 
@@ -706,17 +945,17 @@ int add_node_attr(node_t node, const char* attr_name, const void* type_info, int
         return -1;
     }
 
-    return node_add_attr(node, attr_name, type_info, size);
+    return node_add_attr(node, attr_name, type_name, size);
 }
 
 int get_node_attr_int(node_t node, const char* attr_name, int* attr_val)
 {
-    return get_node_attr_generic(node, attr_name, &typeid(int), attr_val, sizeof(int));
+    return get_node_attr_generic(node, attr_name, typeid(int).name(), attr_val, sizeof(int));
 }
 
 int get_node_attr_float(node_t node, const char* attr_name, float* attr_val)
 {
-    return get_node_attr_generic(node, attr_name, &typeid(float), attr_val, sizeof(float));
+    return get_node_attr_generic(node, attr_name, typeid(float).name(), attr_val, sizeof(float));
 }
 
 int get_node_attr_pointer(node_t node, const char* attr_name, void* attr_val)
@@ -724,19 +963,19 @@ int get_node_attr_pointer(node_t node, const char* attr_name, void* attr_val)
     return get_node_attr_generic(node, attr_name, nullptr, attr_val, sizeof(void*));
 }
 
-int get_node_attr_generic(node_t node, const char* attr_name, const void* type_info, void* buf, int size)
+int get_node_attr_generic(node_t node, const char* attr_name, const char* type_name, void* buf, int size)
 {
-    return node_get_attr_generic(node, attr_name, type_info, buf, size);
+    return node_get_attr_generic(node, attr_name, type_name, buf, size);
 }
 
 int set_node_attr_int(node_t node, const char* attr_name, const int* attr_val)
 {
-    return set_node_attr_generic(node, attr_name, &typeid(int), attr_val, sizeof(int));
+    return set_node_attr_generic(node, attr_name, typeid(int).name(), attr_val, sizeof(int));
 }
 
 int set_node_attr_float(node_t node, const char* attr_name, const float* attr_val)
 {
-    return set_node_attr_generic(node, attr_name, &typeid(float), attr_val, sizeof(float));
+    return set_node_attr_generic(node, attr_name, typeid(float).name(), attr_val, sizeof(float));
 }
 
 int set_node_attr_pointer(node_t node, const char* attr_name, const void* attr_val)
@@ -744,9 +983,9 @@ int set_node_attr_pointer(node_t node, const char* attr_name, const void* attr_v
     return set_node_attr_generic(node, attr_name, nullptr, attr_val, sizeof(void*));
 }
 
-int set_node_attr_generic(node_t node, const char* attr_name, const void* type_info, const void* buf, int size)
+int set_node_attr_generic(node_t node, const char* attr_name, const char* type_name, const void* buf, int size)
 {
-    return node_set_attr_generic(node, attr_name, type_info, buf, size);
+    return node_set_attr_generic(node, attr_name, type_name, buf, size);
 }
 
 tensor_t create_graph_tensor(graph_t graph, const char* tensor_name, int data_type)
@@ -756,6 +995,13 @@ tensor_t create_graph_tensor(graph_t graph, const char* tensor_name, int data_ty
     if(executor->PrerunDone())
     {
         set_tengine_errno(EACCES);
+        return nullptr;
+    }
+
+    if(data_type < TENGINE_DT_FP32 || data_type > TENGINE_DT_INT16)
+    {
+        LOG_ERROR() << "unknown data type: " << data_type << "\n";
+        set_tengine_errno(EINVAL);
         return nullptr;
     }
 
@@ -777,6 +1023,7 @@ tensor_t create_graph_tensor(graph_t graph, const char* tensor_name, int data_ty
 
     new_tensor->SetDataType(data_type);
     new_tensor->SetType(TENSOR_TYPE_CONST);
+    new_tensor->GetShape().SetDataLayout(real_graph->GetLayout());
 
     real_graph->AddTensor(new_tensor);
 
@@ -1028,6 +1275,11 @@ int wait_graph(graph_t graph, int try_wait)
 
 int postrun_graph(graph_t graph)
 {
+    const char* mem_prof = std::getenv("TENGINE_MEM_PROFILE");
+
+    if(mem_prof && mem_prof[0] == '1')
+        dump_mem_prof();
+
     GraphExecutor* executor = reinterpret_cast<GraphExecutor*>(graph);
 
     executor->Postrun();
@@ -1081,8 +1333,17 @@ int set_graph_device(graph_t graph, const char* dev_name)
 
     if(!exec_context->ExistDevice(dev_name))
     {
-        set_tengine_errno(ENOENT);
-        return -1;
+        std::string so_name = std::string("lib") + dev_name + std::string(".so");
+        std::string init_func = std::string(dev_name) + std::string("_init");
+
+        if(load_tengine_plugin(dev_name, so_name.c_str(), init_func.c_str()) < 0)
+        {
+            LOG_ERROR() << "Device " << dev_name << " cannot be found\n";
+            LOG_ERROR() << so_name << " cannot be loaded either\n";
+
+            set_tengine_errno(ENOENT);
+            return -1;
+        }
     }
 
     DevProposal prop;
@@ -1469,13 +1730,14 @@ void dump_graph(graph_t graph)
     /* first: try to dump optimized graph */
     Graph* g = executor->GetOptimizedGraph();
 
-    if(g)
-    {
-        g->DumpGraph();
-        return;
-    }
-
-    /* get the origin graph */
-    g = executor->GetGraph();
     g->DumpGraph();
+}
+
+int set_online_report_status(int new_stat)
+{
+    #ifdef ENABLE_ONLINE_REPORT
+    return set_tengine_report_stat(new_stat);
+    #else
+    return 0;
+    #endif
 }

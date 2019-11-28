@@ -9,18 +9,13 @@
 - yolov2
 - faster_rcnn
 - lighten_cnn
-- caffe_wrapper
-  - cpp_classification(squeezenet, mobilenet, etc)
-  - mtcnn
-- tensorflow_wrapper
-  - label_image(inception_v3, mobilenet, resnet50)
 - tengine_model
   - classification(squeezenet, mobilenet, mobilenet_v2, resnet50, alexnet, googlenet, inception_v3, inception_v4, vgg16)
   - convert(convert caffe model to tengine model)
 
 
 ## Download required models
-Download the models from [Tengine model zoo](https://pan.baidu.com/s/1LXZ8vOdyOo50IXS0CUPp8g) (psw: 57vb).
+Download the models from [Tengine model zoo](https://pan.baidu.com/s/1Ar9334MPeIV1eq4pM1eI-Q) (psw: hhgc).
 
 
 ## How to build these examples

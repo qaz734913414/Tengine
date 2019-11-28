@@ -46,6 +46,7 @@ enum exec_policy_t
 #define EXEC_KERNEL_FP32 0
 #define EXEC_KERNEL_FP16 1
 #define EXEC_KERNEL_INT8 2
+#define EXEC_KERNEL_UINT8 3
 
 #define MODEL_FORMAT_UNKNOWN 0
 #define MODEL_FORMAT_TENGINE 1
@@ -54,6 +55,12 @@ enum exec_policy_t
 #define MODEL_FORMAT_MXNET 4
 #define MODEL_FORMAT_TENSORFLOW 5
 #define MODEL_FORMAT_TFLITE 6
+#define MODEL_FORMAT_DARKNET 7
+#define MODEL_FORMAT_DLA 8
+
+
+#define MODEL_SUBFORMAT_AIPU 1
+#define MODEL_SUBFORMAT_NNIE 2
 
 struct ExecAttr
 {
@@ -61,25 +68,27 @@ struct ExecAttr
     int priority;
     int kernel_mode;
     int model_format;
+    int model_layout;
+    int graph_layout;
     bool low_mem_mode;
     bool fc_mt;    // fc should in multi-threaded?
     bool pooling_mt;    // pooling should in multi-threaded?
     void* exec_context;
     void* dev_handle;
-    int layout;
 
     ExecAttr(void)
     {
         policy = kExecLatency;
         priority = 100;
         kernel_mode = EXEC_KERNEL_FP32;
-        low_mem_mode = false;
+        low_mem_mode = true;
         fc_mt = false;
         pooling_mt = false;
         model_format = MODEL_FORMAT_TENGINE;
         exec_context = nullptr;
         dev_handle = nullptr;
-        layout = -1;
+        graph_layout = -1;
+        model_layout = -1;
     }
 };
 

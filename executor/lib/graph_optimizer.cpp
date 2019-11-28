@@ -33,7 +33,6 @@
 #include "operator/relu.hpp"
 #include "operator/scale.hpp"
 #include "operator/eltwise.hpp"
-
 #include "tensor_mem.hpp"
 
 namespace TEngine {
@@ -48,29 +47,21 @@ static void AddConstNodeToSubGraph(Subgraph* graph, Tensor* tensor, Node* fused_
 static bool Weight_Bn(Subgraph* graph, Node* ConvNode, float* mean, float* var, float* gamma, float* beta, float eps,
                       float rescale_factor, Tensor* bias_tensor)
 {
-    Tensor* input_tensor = ConvNode->GetInputTensor(0);
+    Tensor* kernel_tensor = ConvNode->GetInputTensor(1);
     Convolution* conv_op = dynamic_cast<Convolution*>(ConvNode->GetOp());
     ConvParam* param = conv_op->GetParam();
-    const TShape& input_shape = input_tensor->GetShape();
+    const TShape& kernel_shape = kernel_tensor->GetShape();
 
     int group = param->group;
-    int input_chan = input_shape.Shape(1) / group;
-
-    Tensor* output_tensor = ConvNode->GetOutputTensor(0);
-    TShape& output_shape = output_tensor->GetShape();
-
-    int output_chan = output_shape.GetC() / group;
-
+    // int input_chan = kernel_shape.Shape(1);
+    int input_chan = kernel_shape.GetC();
+    int output_chan = kernel_shape.Shape(0) / group;
     int kernel_x = param->kernel_w;
     int kernel_y = param->kernel_h;
     int kernel_size = input_chan * kernel_x * kernel_y;
-
-    Tensor* kernel_tensor = ConvNode->GetInputTensor(1);
     float* kernel_org = ( float* )get_tensor_mem(kernel_tensor);
-
-    int channel_num = output_shape.GetC();
-
-    float* kernel_new = ( float* )(malloc(kernel_size * channel_num * sizeof(float)));
+    int channel_num = kernel_shape.Shape(0);
+    float* kernel_new = ( float* )(malloc(kernel_size * channel_num * sizeof(float) + 128));
 
     memcpy(kernel_new, kernel_org, sizeof(float) * kernel_size * channel_num);
 
@@ -102,7 +93,7 @@ static bool Weight_Bn(Subgraph* graph, Node* ConvNode, float* mean, float* var, 
 
     {
         Tensor* new_bias_tensor = new Tensor(bias_name);
-        std::vector<int> dims{1, channel_num, 1, 1};
+        std::vector<int> dims{channel_num};
 
         TShape bias_shape;
         bias_shape.SetDim(dims);
@@ -110,7 +101,7 @@ static bool Weight_Bn(Subgraph* graph, Node* ConvNode, float* mean, float* var, 
         new_bias_tensor->Reshape(bias_shape);
         new_bias_tensor->SetType(kConstTensor);
 
-        void* bias_new = ( void* )malloc(channel_num * sizeof(float));
+        void* bias_new = ( void* )malloc(channel_num * sizeof(float) + 128);
 
         new_bias_tensor->SetMemAddr(bias_new);
 
@@ -157,22 +148,43 @@ static bool Weight_Bn(Subgraph* graph, Node* ConvNode, float* mean, float* var, 
             scale_mean[c] = scale_mean[c] + beta[c];
         }
     }
-
-    for(int g = 0; g < group; g++)
+    if(kernel_shape.GetDataLayout() == TENGINE_LAYOUT_NCHW)
     {
-        float* kernel = kernel_new + g * output_chan * kernel_size;
-
-        for(int o_c = 0; o_c < output_chan; o_c++)
+        for(int g = 0; g < group; g++)
         {
-            float w_scale = scale_var_inv[g * output_chan + o_c];
-
-            for(int i = 0; i < kernel_size; i++)
+            float* kernel = kernel_new + g * output_chan * kernel_size;
+            for(int o_c = 0; o_c < output_chan; o_c++)
             {
-                kernel[o_c * kernel_size + i] = kernel[o_c * kernel_size + i] * w_scale;
+                float w_scale = scale_var_inv[g * output_chan + o_c];
+                for(int i = 0; i < kernel_size; i++)
+                {
+                    kernel[o_c * kernel_size + i] = kernel[o_c * kernel_size + i] * w_scale;
+                }
             }
         }
     }
-
+    else
+    {
+        for(int o_c = 0; o_c < output_chan; o_c++)
+        {
+            for(int k_h = 0; k_h < kernel_y; ++k_h)
+            {
+                for(int k_w = 0; k_w < kernel_x; ++k_w)
+                {
+                    for(int g = 0; g < group; ++g)
+                    {
+                        float w_scale = scale_var_inv[g * output_chan + o_c];
+                        for(int i_c = 0; i_c < input_chan; ++i_c)
+                        {
+                            int weight_idx = o_c * group * kernel_size + k_h * kernel_x * input_chan * group +
+                                             k_w * input_chan * group + g * input_chan + i_c;
+                            kernel_new[weight_idx] = kernel_new[weight_idx] * w_scale;
+                        }
+                    }
+                }
+            }
+        }
+    }
     float* bias_tmp = ( float* )get_tensor_mem(ConvNode->GetInputTensor(2));
 
     for(int i = 0; i < channel_num; i++)
@@ -661,7 +673,10 @@ static bool GraphFuseConvReLuCommon(Graph* graph, GraphOptimizer* opt, bool relu
 
         if(!NodeInGraph(conv_node, graph))
             continue;
-
+        // if parents has muti_consumer: not fuse
+        Tensor* conv_otensor = conv_node->GetOutputTensor(0);
+        if(conv_otensor->consumer.size() > 1)
+            continue;
         Subgraph* sub = new Subgraph("conv_relu");
 
         sub->seq_nodes.push_back(conv_node);
@@ -751,12 +766,10 @@ static bool GraphFuseConvReLuCommon(Graph* graph, GraphOptimizer* opt, bool relu
 
     return true;
 }
-
 static bool GraphFuseConvReLu(Graph* graph, GraphOptimizer* opt)
 {
     return GraphFuseConvReLuCommon(graph, opt, false);
 }
-
 static bool GraphFuseConvReLu6(Graph* graph, GraphOptimizer* opt)
 {
     return GraphFuseConvReLuCommon(graph, opt, true);

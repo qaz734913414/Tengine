@@ -25,8 +25,13 @@
 
 #include "operator.hpp"
 #include "attribute.hpp"
+#include "serializer.hpp"
 
 namespace TEngine {
+
+template class SpecificFactory<Serializer>;
+// template SpecificFactory<Serializer> SpecificFactory<Serializer>::instance;
+template SerializerManager SimpleObjectManagerWithLock<SerializerManager, SerializerPtr>::instance;
 
 static Attribute op_method_load_map;
 static Attribute op_method_save_map;
@@ -58,6 +63,23 @@ any& GetOpLoadMethod(const std::string& op_name, const std::string& method_name)
     std::string key = op_name + method_name;
 
     return op_method_load_map[key];
+}
+
+bool FindOpSaveMethod(const std::string& op_name, const std::string& method_name)
+{
+    std::string key = op_name + method_name;
+
+    if(op_method_save_map.ExistAttr(key))
+        return true;
+
+    return false;
+}
+
+any& GetOpSaveMethod(const std::string& op_name, const std::string& method_name)
+{
+    std::string key = op_name + method_name;
+
+    return op_method_save_map[key];
 }
 
 }    // namespace TEngine

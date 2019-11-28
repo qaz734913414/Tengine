@@ -1,4 +1,3 @@
-obj-y+=conv_ref.o
 obj-y+=concat.o
 obj-y+=dropout.o
 obj-y+=softmax.o
@@ -22,11 +21,25 @@ obj-y+=resize.o
 obj-y+=pooling.o
 obj-y+=batchnorm.o
 obj-y+=scale.o
-obj-y+=custom_kernel_ops.o
 obj-y+=logistic.o
 obj-y+=detection_postprocess.o
+obj-y+=stridedslice.o
+obj-y+=pad.o
+obj-y+=upsample.o
+obj-y+=crop.o
+obj-y+=l2normalization.o
+obj-y+=l2pool.o
+obj-y+=elu.o
+obj-y+=layernormlstm.o
+obj-y+=relu1.o
+
 obj-y+=fused/
 obj-y+=init.o
+
+obj-y+=copy.o
+obj-y+=power.o
+obj-y+=feature_match.o
+
 
 obj-$(CONFIG_ARCH_BLAS)+=blas/
 

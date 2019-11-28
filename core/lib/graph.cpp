@@ -131,7 +131,6 @@ bool Graph::CreateNodeFromStatic(Node* node, const StaticGraph* static_graph, co
     StaticOp* static_op = static_node->op.get();
 
     Operator* op = OpManager::CreateOp(static_op->name);
-
     if(op == nullptr)
     {
         XLOG_ERROR() << "failed to create operator: " << static_op->name << "\n";
@@ -141,6 +140,14 @@ bool Graph::CreateNodeFromStatic(Node* node, const StaticGraph* static_graph, co
     op->ParamFromStaticOp(static_op);
     op->SetDynamicShape(static_op->dynamic_shape);
     node->SetDynamicShape(static_op->dynamic_shape);
+
+    /* copy attrs in static_node */
+    std::vector<std::string> node_attr_name = static_node->attrs.ListAttr();
+
+    for(unsigned int i = 0; i < node_attr_name.size(); i++)
+    {
+        node->SetAttr(node_attr_name[i], static_node->attrs.GetAttr(node_attr_name[i]));
+    }
 
     /* copy attrs in static_op  */
     std::vector<std::string> attr_name = static_op->attrs.ListAttr();
@@ -166,15 +173,23 @@ bool Graph::CreateNodeFromStatic(Node* node, const StaticGraph* static_graph, co
 
         TShape& shape = tensor->GetShape();
 
-        shape.SetDataLayout(static_tensor->data_layout);
+        shape.SetDataLayout(static_graph->graph_layout);
         shape.SetDim(static_tensor->dims);
 
         std::vector<QuantParam>* quant_param = tensor->GetQuantParam();
         quant_param->resize(1);
 
-        (*quant_param)[0].scale = static_tensor->scale;
-        (*quant_param)[0].zero_point = static_tensor->zero_point;
-
+        //        (*quant_param)[0].scale = static_tensor->scale;
+        //        (*quant_param)[0].zero_point = static_tensor->zero_point;
+        //        (*quant_param)[0].width = static_tensor->width;
+        int scale_num = ( int )static_tensor->scale.size();
+        quant_param->resize(scale_num);
+        for(int i = 0; i < scale_num; i++)
+        {
+            (*quant_param)[i].scale = static_tensor->scale[i];
+            (*quant_param)[i].zero_point = static_tensor->zero_point[i];
+            (*quant_param)[i].width = static_tensor->width;
+        }
         if(static_tensor->type == kConstTensor)
         {
             StaticConstTensor* const_tensor = dynamic_cast<StaticConstTensor*>(static_tensor);
@@ -227,6 +242,7 @@ bool Graph::SetupConnection(Tensor* tensor, const StaticGraph* static_graph, con
     return true;
 }
 
+#if 0
 static int model_format_mapping(const std::string& fmt)
 {
     if(fmt == "tengine")
@@ -258,6 +274,7 @@ static int model_format_mapping(const std::string& fmt)
         return MODEL_FORMAT_UNKNOWN;
     }
 }
+#endif
 
 bool Graph::RealCreateFromStatic(const StaticGraphPtr& static_graph)
 {
@@ -324,7 +341,11 @@ bool Graph::RealCreateFromStatic(const StaticGraphPtr& static_graph)
 
     /* save the model format */
 
-    model_format_ = model_format_mapping(static_graph->source_format);
+    // model_format_ = model_format_mapping(static_graph->source_format);
+    model_format_ = static_graph->model_format;
+    model_subformat_ = static_graph->model_subformat;
+    model_layout_ = static_graph->model_layout;
+    layout_ = static_graph->graph_layout;
 
     return true;
 }

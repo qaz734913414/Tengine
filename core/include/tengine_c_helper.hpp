@@ -29,29 +29,42 @@
 
 extern "C" {
 
-int node_add_attr(node_t node, const char* attr_name, const void* type_info, int size);
+int node_add_attr(node_t node, const char* attr_name, const char* type_name, int size);
 
-int node_get_attr_generic(void* node, const char* param_name, const void* type_info, void* param_val, int param_size);
-int node_set_attr_generic(void* node, const char* param_name, const void* type_info, const void* param_val,
+int node_get_attr_generic(void* node, const char* param_name, const char* type_name, void* param_val, int param_size);
+int node_set_attr_generic(void* node, const char* param_name, const char* type_name, const void* param_val,
                           int param_size);
 
 void set_cpu_list(const char* cpu_list_str);
 
 int vload_file_model(context_t exec_context, const char* model_name, const char* model_format, const char* fname,
                      va_list argp);
+int vload_mem_model(context_t exec_context, const char* model_name, const char* model_format, const void* addr,
+                    int mem_size, va_list argp);
 
 graph_t create_graph_in_context(context_t exec_context, const char* graph_name, const char* model_name);
 
 int save_graph_internal(graph_t graph, const char* file_format, const char* fname, va_list argp);
+#if 1
+//TODO remove
+void dump_graph_tensor_scale_internal(graph_t graph);
+#endif
+int quant_graph_internal(graph_t graph, int quant_mode, int node_no_quant_idxs[], int node_no_quant_number);
+
+int post_train_graph_internal(graph_t graph,const char* file_name);
+
+int get_model_format(graph_t graph);
 
 const char* get_model_name(graph_t graph);
+
+const char* get_tengine_hcl_version();
 }
 
 namespace TEngine {
 
 class GraphExecutor;
 
-void InitAllPlugin(void);
+int InitAllPlugin(void);
 
 GraphExecutor* do_merge_graph(std::vector<GraphExecutor*>& exec_list);
 

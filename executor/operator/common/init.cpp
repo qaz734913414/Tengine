@@ -26,7 +26,6 @@
 
 namespace TEngine {
 
-extern void NodeOpsRegistryManagerInit(void);
 extern void RegisterConcatNodeExec(void);
 extern void RegisterDropoutNodeExec(void);
 extern void RegisterSoftmaxNodeExec(void);
@@ -49,27 +48,34 @@ extern void RegisterReLuNodeExec(void);
 extern void RegisterResizeNodeExec(void);
 extern void RegisterLogisticNodeExec(void);
 extern void RegisterDetectionPostProcessNodeExec(void);
-extern void RegisterConv2dRef(void);
-
+extern void RegisterStridedSliceNodeExec(void);
+extern void RegisterPadNodeExec(void);
+extern void RegisterUpsampleNodeExec(void);
+extern void RegisterFMCommonNodeExec(void);
+extern void RegisterL2NormalizationNodeExec(void);
+extern void RegisterL2Pool_NodeExec(void);
+extern void RegisterEluNodeExec(void);
+extern void RegisterLayerNormLSTMNodeExec(void);
+extern void RegisterReLU1NodeExec(void);
 #ifdef CONFIG_ARCH_BLAS
 extern void RegisterConvBlasNodeExec(void);
 extern void RegisterDeconvBlasNodeExec(void);
 extern void RegisterFcBlasNodeExec(void);
 extern void RegisterLSTMNodeExec(void);
+extern void RegisterRNNNodeExec(void);
+extern void RegisterGRUNodeExec(void);
 #endif
 extern void RegisterPooling_NodeExec(void);
 extern void RegisterBatchNorm_NodeExec(void);
 extern void RegisterScale_NodeExec(void);
+extern void RegisterCrop_NodeExec(void);
+extern void RegisterCopy_NodeExec(void);
+extern void RegisterPower_NodeExec(void);
 
 extern void RegisterCommonFusedBNScaleReluNodeExec(void);
-extern void RegisterDemoOps(void);
 
 void RegisterCommonOps(void)
 {
-#ifndef ANDROID
-    RegisterDemoOps();
-#endif
-
     RegisterConcatNodeExec();
     RegisterDropoutNodeExec();
     RegisterSoftmaxNodeExec();
@@ -92,17 +98,30 @@ void RegisterCommonOps(void)
     RegisterResizeNodeExec();
     RegisterLogisticNodeExec();
     RegisterDetectionPostProcessNodeExec();
-    RegisterConv2dRef();
-
+    RegisterStridedSliceNodeExec();
+    RegisterPadNodeExec();
+    RegisterUpsampleNodeExec();
+    RegisterFMCommonNodeExec();
+    RegisterL2NormalizationNodeExec();
+    RegisterL2Pool_NodeExec();
+    RegisterEluNodeExec();
+    RegisterLayerNormLSTMNodeExec();
+    RegisterReLU1NodeExec();
 #ifdef CONFIG_ARCH_BLAS
     RegisterConvBlasNodeExec();
     RegisterDeconvBlasNodeExec();
     RegisterFcBlasNodeExec();
     RegisterLSTMNodeExec();
+    RegisterRNNNodeExec();
+    RegisterGRUNodeExec();
 #endif
     RegisterPooling_NodeExec();
     RegisterBatchNorm_NodeExec();
+    RegisterCrop_NodeExec();
     RegisterScale_NodeExec();
+    RegisterCrop_NodeExec();
+    RegisterCopy_NodeExec();
+    RegisterPower_NodeExec();
 
     RegisterCommonFusedBNScaleReluNodeExec();
 }

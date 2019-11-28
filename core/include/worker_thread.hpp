@@ -26,10 +26,17 @@
 #ifndef __WORKER_THREAD_HPP__
 #define __WORKER_THREAD_HPP__
 
+#include <sched.h>
+#include <sys/time.h>
+#include <errno.h>
+#include <string.h>
+
 #include <queue>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+
+#include "logger.hpp"
 
 namespace TEngine {
 
@@ -107,6 +114,8 @@ public:
 private:
     void DoWork(void)
     {
+        int task_done_count = 0;
+
         // bind CPU first
         if(bind_cpu_ >= 0)
         {
@@ -117,6 +126,12 @@ private:
             if(sched_setaffinity(0, sizeof(mask), &mask) == 0)
                 bind_done_ = true;
         }
+
+        // set scheduler
+        struct sched_param sched_param;
+
+        sched_param.sched_priority = 10;
+        sched_setscheduler(0, SCHED_RR, &sched_param);
 
         while(true)
         {
@@ -130,6 +145,8 @@ private:
 
             if(inc_done_)
                 inc_done_(1);
+
+            task_done_count++;
         }
     }
 
